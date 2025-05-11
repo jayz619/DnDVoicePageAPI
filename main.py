@@ -1,70 +1,81 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-import os
-import json
+import requests
 import firebase_admin
 from firebase_admin import credentials, storage
-import requests
-import tempfile
-import datetime
+import os
+import uuid
+import json
 
-# Load Firebase credentials from env var
+# Load Firebase credentials
 creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if creds_json:
     cred = credentials.Certificate(json.loads(creds_json))
     firebase_admin.initialize_app(cred, {
-        'storageBucket': f"{json.loads(creds_json)['project_id']}.appspot.com"
+        "storageBucket": "dn-d-v3-2gt5bn.appspot.com"
     })
 
-app = FastAPI()
-
+# Get ElevenLabs API Key
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 
+# FastAPI app
+app = FastAPI()
+
+# Request model
 class VoiceRequest(BaseModel):
     userText: str
     selectedVoiceid: str
     selectedEmotion: str
 
-def apply_emotion_prompt(emotion: str, text: str) -> str:
-    emotion_prompts = {
-        "angry": f"He growled angrily, \"{text}\"",
-        "sad": f"She whispered sadly, \"{text}\"",
-        "excited": f"He exclaimed with excitement, \"{text}\"",
-        "happy": f"She smiled and said, \"{text}\"",
-        "narration": f"In a calm and descriptive tone, \"{text}\"",
-        "neutral": text
+# Emotion prompt injector
+def format_prompt(text: str, emotion: str) -> str:
+    cues = {
+        "angry": "[speak with rage and aggression]",
+        "happy": "[speak cheerfully and with excitement]",
+        "sad": "[speak softly with a somber tone]",
+        "narrator": "[narrate with clarity and depth]",
+        "whisper": "[speak in a low whisper]",
+        "robotic": "[speak in a robotic monotone]",
     }
-    return emotion_prompts.get(emotion.lower(), text)
+    cue = cues.get(emotion.lower(), "")
+    return f"{cue} {text}"
 
+# API Endpoint
 @app.post("/generate")
 async def generate_audio(data: VoiceRequest):
     try:
-        formatted_text = apply_emotion_prompt(data.selectedEmotion, data.userText)
-
+        formatted_text = format_prompt(data.userText, data.selectedEmotion)
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{data.selectedVoiceid}"
-        payload = {
-            "text": formatted_text,
-            "model_id": "eleven_multilingual_v2"
-        }
+
         headers = {
             "xi-api-key": ELEVENLABS_API_KEY,
             "Content-Type": "application/json"
         }
+        payload = {
+            "text": formatted_text,
+            "model_id": "eleven_multilingual_v2"
+        }
 
         response = requests.post(url, json=payload, headers=headers)
         if response.status_code != 200:
-            return {"error": "Voice generation failed", "details": response.text}
+            return {
+                "error": "Voice generation failed",
+                "details": response.text
+            }
 
-        audio_bytes = response.content
-
-        # Upload to Firebase
-        file_name = f"voiceOvers/voice_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.mp3"
+        # Upload to Firebase Storage
+        file_name = f"voiceovers/{str(uuid.uuid4())}.mp3"
         bucket = storage.bucket()
         blob = bucket.blob(file_name)
-        blob.upload_from_string(audio_bytes, content_type="audio/mpeg")
+        blob.upload_from_string(response.content, content_type="audio/mpeg")
         blob.make_public()
 
         return {"audioUrl": blob.public_url}
 
     except Exception as e:
         return {"error": str(e)}
+
+# Local testing
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
