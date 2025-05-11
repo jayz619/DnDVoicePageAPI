@@ -13,7 +13,7 @@ creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if creds_json:
     cred = credentials.Certificate(json.loads(creds_json))
     firebase_admin.initialize_app(cred, {
-        'storageBucket': f"{json.loads(creds_json)['project_id']}.appspot.com"
+        'storageBucket': 'dn-d-v3-2gt5bn.firebasestorage.app'
     })
 
 app = FastAPI()
