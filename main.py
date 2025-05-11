@@ -5,7 +5,7 @@ import base64
 
 app = FastAPI()
 
-ELEVENLABS_API_KEY = "YOUR_ELEVENLABS_API_KEY"
+ELEVENLABS_API_KEY = "sk_7723ae0f43fc2638619ac7cbf13baf7b16bcc4b49a7f3262"
 
 class VoiceRequest(BaseModel):
     userText: str
