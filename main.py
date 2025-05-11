@@ -3,36 +3,31 @@ from pydantic import BaseModel
 import requests
 import firebase_admin
 from firebase_admin import credentials, storage
-import tempfile
 import uuid
 import os
+import io
 import json
+
+# Load Firebase credentials from env var
+creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+if creds_json:
+    cred = credentials.Certificate(json.loads(creds_json))
+    firebase_admin.initialize_app(cred, {
+        'storageBucket': f"{json.loads(creds_json)['project_id']}.appspot.com"
+    })
 
 app = FastAPI()
 
-# Load Firebase credentials from environment
-firebase_creds = json.loads(os.getenv("FIREBASE_CREDENTIALS"))
-cred = credentials.Certificate(firebase_creds)
-firebase_admin.initialize_app(cred, {
-    "storageBucket": os.getenv("FIREBASE_BUCKET")
-})
-
-ELEVENLABS_API_KEY = "sk_7723ae0f43fc2638619ac7cbf13baf7b16bcc4b49a7f3262"
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")  # Set in your Render env vars
 
 class VoiceRequest(BaseModel):
     userText: str
     selectedVoiceid: str
 
-def upload_to_firebase(audio_bytes: bytes) -> str:
-    filename = f"{uuid.uuid4()}.mp3"
-    blob = storage.bucket().blob(f"voiceOvers/{filename}")
-    blob.upload_from_string(audio_bytes, content_type="audio/mpeg")
-    blob.make_public()
-    return blob.public_url
-
 @app.post("/generate")
 async def generate_audio(data: VoiceRequest):
     try:
+        # Call ElevenLabs API
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{data.selectedVoiceid}"
         payload = {
             "text": data.userText,
@@ -48,14 +43,19 @@ async def generate_audio(data: VoiceRequest):
             return {"error": "Voice generation failed", "details": response.text}
 
         audio_bytes = response.content
-        audio_url = upload_to_firebase(audio_bytes)
 
-        return {"audioUrl": audio_url}
+        # Upload to Firebase Storage
+        file_name = f"audio/{uuid.uuid4()}.mp3"
+        bucket = storage.bucket()
+        blob = bucket.blob(file_name)
+        blob.upload_from_file(io.BytesIO(audio_bytes), content_type='audio/mpeg')
+        blob.make_public()
+
+        return {"audioUrl": blob.public_url}
 
     except Exception as e:
         return {"error": str(e)}
 
-# For local testing only (Render ignores this)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
