@@ -1,19 +1,19 @@
 import os
 import json
-import tempfile
+import uuid
 import firebase_admin
 from firebase_admin import credentials, storage, auth
-from fastapi import FastAPI, Header
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Load Firebase credentials from environment variable
 creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if creds_json:
     cred = credentials.Certificate(json.loads(creds_json))
     firebase_admin.initialize_app(cred, {
-        'storageBucket': f"dn-d-v3-2gt5bn.appspot.com"  # use appspot.com, not firebasestorage.app
+        'storageBucket': "dn-d-v3-2gt5bn.appspot.com"
     })
 
 app = FastAPI()
@@ -28,14 +28,14 @@ class VoiceRequest(BaseModel):
 @app.post("/generate")
 async def generate_audio(data: VoiceRequest, authorization: str = Header(...)):
     try:
-        # ✅ Extract Firebase ID token from header
+        # 🔐 Verify Firebase Auth token
         if not authorization.startswith("Bearer "):
-            return {"error": "Invalid Authorization header format"}
+            raise HTTPException(status_code=401, detail="Invalid Authorization header")
         id_token = authorization.split("Bearer ")[1]
         decoded_token = auth.verify_id_token(id_token)
-        uid = decoded_token["uid"]
+        uid = decoded_token["uid"]  # Optional: log or use if needed
 
-        # Emotion to narrative mapping
+        # 📖 Emotion narrative mapping
         emotion_map = {
             "angry": "he shouted in rage.",
             "happy": "he said with joy.",
@@ -46,7 +46,7 @@ async def generate_audio(data: VoiceRequest, authorization: str = Header(...)):
         }
         narrative = emotion_map.get(data.selectedEmotion.lower(), "he said.")
 
-        # Call ElevenLabs API
+        # 🎙️ Call ElevenLabs API
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{data.selectedVoiceid}"
         payload = {
             "text": data.userText,
@@ -67,21 +67,21 @@ async def generate_audio(data: VoiceRequest, authorization: str = Header(...)):
         if response.status_code != 200:
             return {"error": "Voice generation failed", "details": response.text}
 
-        # ✅ Upload to user-specific folder
+        # ☁️ Upload to Firebase Storage with UUID filename
         bucket = storage.bucket()
-        timestamp = datetime.utcnow().timestamp()
-        filename = f"voiceOvers/{uid}/{timestamp}.mp3"
+        unique_id = str(uuid.uuid4())
+        filename = f"voiceOvers/{unique_id}.mp3"
         blob = bucket.blob(filename)
         blob.upload_from_string(response.content, content_type="audio/mpeg")
 
-        # ✅ Return a signed URL valid for 1 day
-        signed_url = blob.generate_signed_url(
-            expiration=timedelta(days=1),
-            method='GET',
-            version='v4'
-        )
+        # 🌐 Make file public
+        blob.make_public()
 
-        return {"audioUrl": signed_url}
+        # ✅ Return permanent public URL
+        return {
+            "audioUrl": blob.public_url,
+            "filePath": filename
+        }
 
     except Exception as e:
         return {"error": str(e)}
