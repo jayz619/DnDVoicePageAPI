@@ -1,5 +1,6 @@
 import os
 import json
+import tempfile
 import firebase_admin
 from firebase_admin import credentials, storage
 from fastapi import FastAPI
@@ -12,7 +13,7 @@ creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if creds_json:
     cred = credentials.Certificate(json.loads(creds_json))
     firebase_admin.initialize_app(cred, {
-        'storageBucket': "dn-d-v3-2gt5bn.firebasestorage.app"
+        'storageBucket': f"dn-d-v3-2gt5bn.firebasestorage.app"
     })
 
 app = FastAPI()
@@ -23,11 +24,12 @@ class VoiceRequest(BaseModel):
     userText: str
     selectedVoiceid: str
     selectedEmotion: str
-    userId: str  # 🔒 Firebase UID from frontend
+    userId: str  # 🔒 Firebase UID
 
 @app.post("/generate")
 async def generate_audio(data: VoiceRequest):
     try:
+        # Emotion to narrative mapping
         emotion_map = {
             "angry": "he shouted in rage.",
             "happy": "he said with joy.",
@@ -59,13 +61,13 @@ async def generate_audio(data: VoiceRequest):
         if response.status_code != 200:
             return {"error": "Voice generation failed", "details": response.text}
 
+        # Upload to Firebase Storage — in user-specific folder
+        bucket = storage.bucket()
         timestamp = datetime.utcnow().timestamp()
         filename = f"voiceOvers/{data.userId}/{timestamp}.mp3"
-
-        bucket = storage.bucket()
         blob = bucket.blob(filename)
         blob.upload_from_string(response.content, content_type="audio/mpeg")
-        blob.make_public()  # Optional — comment out if you want private access
+        blob.make_public()
 
         return {"audioUrl": blob.public_url}
 
