@@ -1,6 +1,5 @@
 import os
 import json
-import tempfile
 import firebase_admin
 from firebase_admin import credentials, storage
 from fastapi import FastAPI
@@ -13,23 +12,21 @@ creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if creds_json:
     cred = credentials.Certificate(json.loads(creds_json))
     firebase_admin.initialize_app(cred, {
-        'storageBucket': f"dn-d-v3-2gt5bn.firebasestorage.app"
+        'storageBucket': "dn-d-v3-2gt5bn.appspot.com"  # ✅ Ensure this is correct
     })
 
 app = FastAPI()
-
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 
 class VoiceRequest(BaseModel):
     userText: str
     selectedVoiceid: str
     selectedEmotion: str
-    userId: str  # 🔒 Firebase UID
+    userId: str  # 🟢 Comes from FlutterFlow Auth user ID
 
 @app.post("/generate")
 async def generate_audio(data: VoiceRequest):
     try:
-        # Emotion to narrative mapping
         emotion_map = {
             "angry": "he shouted in rage.",
             "happy": "he said with joy.",
@@ -38,7 +35,6 @@ async def generate_audio(data: VoiceRequest):
             "calm": "he said peacefully.",
             "excited": "he said, brimming with excitement."
         }
-
         narrative = emotion_map.get(data.selectedEmotion.lower(), "he said.")
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{data.selectedVoiceid}"
@@ -61,10 +57,8 @@ async def generate_audio(data: VoiceRequest):
         if response.status_code != 200:
             return {"error": "Voice generation failed", "details": response.text}
 
-        # Upload to Firebase Storage — in user-specific folder
         bucket = storage.bucket()
-        timestamp = datetime.utcnow().timestamp()
-        filename = f"voiceOvers/{data.userId}/{timestamp}.mp3"
+        filename = f"voiceOvers/{data.userId}/{datetime.utcnow().timestamp()}.mp3"
         blob = bucket.blob(filename)
         blob.upload_from_string(response.content, content_type="audio/mpeg")
         blob.make_public()
